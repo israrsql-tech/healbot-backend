@@ -8,14 +8,16 @@ You are a multilingual health assistant for a medicine reminder app.
 
 Hard rules:
 - Reply in the same language as the user's latest message.
-- No diagnosis. No prescription changes. No "start/stop/change dose" advice.
-- Provide general educational information.
+- No diagnosis.
+- No prescription changes.
+- No "start/stop/change dose" advice.
+- Provide only general educational information.
 `.trim();
 
 const getTodayISO_IST = () =>
   new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 
-const clampText = (s, max = 6000) => {
+const clampText = (s, max = 4000) => {
   const t = String(s ?? "");
   return t.length > max ? t.slice(0, max) + " …(trimmed)" : t;
 };
@@ -46,7 +48,7 @@ router.post("/", auth, async (req, res) => {
 
     const patient = patientRes.rows[0];
 
-    // Medicines
+    // Fetch medicines
     const medsRes = await pool.query(
       `SELECT id, name, dosage, unit, start_date, end_date
        FROM medicines
@@ -62,85 +64,54 @@ router.post("/", auth, async (req, res) => {
       medicines: medsRes.rows,
     };
 
+    // Last 8 messages only (token safe)
     const lastMsgs = messages.slice(-8).map((m) => ({
       role: m.role || "user",
-      content: clampText(m.content, 2000),
+      content: clampText(m.content, 1500),
     }));
 
-    const prompt =
-      SYSTEM_PROMPT +
-      "\n\nCONTEXT:\n" +
-      JSON.stringify(contextObj, null, 2) +
-      "\n\nCHAT:\n" +
-      lastMsgs.map((m) => `${m.role}: ${m.content}`).join("\n") +
-      "\n\nAssistant:";
+    // Final message structure for Groq
+    const finalMessages = [
+      { role: "system", content: SYSTEM_PROMPT },
+      {
+        role: "system",
+        content: `Context:\n${JSON.stringify(contextObj, null, 2)}`
+      },
+      ...lastMsgs
+    ];
 
     // ===============================
-    // REPLICATE API START
+    // GROQ API CALL
     // ===============================
 
-    // Step 1: Create prediction
-    const createPrediction = await fetch(
-      "https://api.replicate.com/v1/predictions",
+    const groqResponse = await fetch(
+      "https://api.groq.com/openai/v1/chat/completions",
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${process.env.REPLICATE_API_TOKEN}`
+          "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
         },
         body: JSON.stringify({
-          version: "a0fdc44e4f2e1f20f2bb4e27846899953ac8e66c5886c5878fa1d6b73ce009e5",
-          input: {
-            prompt: prompt,
-            max_new_tokens: 650,
-            temperature: 0.3
-          }
+          model: "llama3-8b-8192",
+          messages: finalMessages,
+          temperature: 0.3,
+          max_tokens: 400
         })
       }
     );
-    console.log("TOKEN:", process.env.REPLICATE_API_TOKEN);
 
-    const predictionData = await createPrediction.json();
+    const data = await groqResponse.json();
 
-    if (!createPrediction.ok) {
-      console.error("Replicate Error:", predictionData);
-      return res.status(500).json({ error: "Replicate request failed" });
+    if (!groqResponse.ok) {
+      console.error("Groq Error:", data);
+      return res.status(500).json({ error: "Groq request failed" });
     }
 
-    let predictionId = predictionData.id;
-    let status = predictionData.status;
-    let result;
-
-    // Step 2: Poll until finished
-    while (status !== "succeeded" && status !== "failed") {
-      await new Promise(resolve => setTimeout(resolve, 1500));
-
-      const poll = await fetch(
-        `https://api.replicate.com/v1/predictions/${predictionId}`,
-        {
-          headers: {
-            "Authorization": `Bearer ${process.env.REPLICATE_API_TOKEN}`
-          }
-        }
-      );
-
-      result = await poll.json();
-      status = result.status;
-    }
-
-    if (status === "failed") {
-      return res.status(500).json({ error: "Model failed" });
-    }
-
-    const reply = Array.isArray(result.output)
-      ? result.output.join("")
-      : result.output || "";
+    const reply =
+      data?.choices?.[0]?.message?.content || "No response generated.";
 
     return res.json({ reply });
-
-    // ===============================
-    // REPLICATE API END
-    // ===============================
 
   } catch (error) {
     console.error("CHAT ERROR:", error);
