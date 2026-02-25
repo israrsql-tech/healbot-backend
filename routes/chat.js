@@ -89,7 +89,7 @@ router.post("/", auth, async (req, res) => {
           "Authorization": `Bearer ${process.env.REPLICATE_API_TOKEN}`
         },
         body: JSON.stringify({
-          model: "meta/meta-llama-3-8b-instruct",
+          version: "a0fdc44e4f2e1f20f2bb4e27846899953ac8e66c5886c5878fa1d6b73ce009e5",
           input: {
             prompt: prompt,
             max_new_tokens: 650,
