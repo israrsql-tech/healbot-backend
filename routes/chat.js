@@ -93,7 +93,7 @@ router.post("/", auth, async (req, res) => {
           "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
         },
         body: JSON.stringify({
-          model: "llama3-8b-8192",
+          model: "llama-3.1-8b-instant",
           messages: finalMessages,
           temperature: 0.3,
           max_tokens: 400
