@@ -98,6 +98,7 @@ router.post("/", auth, async (req, res) => {
         })
       }
     );
+    console.log("TOKEN:", process.env.REPLICATE_API_TOKEN);
 
     const predictionData = await createPrediction.json();
 
